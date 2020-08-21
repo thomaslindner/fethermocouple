@@ -27,6 +27,10 @@ public:
    TMFE* fMfe;
    TMFeEquipment* fEq;
 
+   int fEventSize;
+   char* fEventBuf;
+
+
    std::vector<Thermocouple*> rtd;
    std::vector<int> hubPorts = std::vector<int>(NMAX, -1);
    std::vector<std::string> type = std::vector<std::string>(NMAX, "RTD_TYPE_PT100_3850");
@@ -37,7 +41,9 @@ public:
    Myfe(TMFE* mfe, TMFeEquipment* eq) // ctor
    {
       fMfe = mfe;
-      fEq  = eq;
+      fEq  = eq;      
+      fEventSize = 0;
+      fEventBuf  = NULL;
    }
 
    ~Myfe() // dtor
@@ -47,10 +53,22 @@ public:
       }
       rtd.clear();
       fMfe->Disconnect();
+
+      if (fEventBuf) {
+         free(fEventBuf);
+         fEventBuf = NULL;
+      }
    }
 
    void Init()
    {
+
+      fEventSize = 100;
+      if (fEventBuf) {
+         free(fEventBuf);
+      }
+      fEventBuf = (char*)malloc(fEventSize);
+
       fEq->fOdbEqSettings->RIA("HubPorts", &hubPorts, true, NMAX);
       fEq->fOdbEqSettings->RI("SerNo", &serNum, true);
       fEq->fOdbEqSettings->RSA("Type", &type, true, NMAX);
@@ -131,6 +149,35 @@ public:
       }
       fEq->fOdbEqVariables->WDA("Temperature", temperature);
       fEq->SetStatus(StatString().c_str(), "lightgreen");
+
+      
+      // Send event with thermocouple data
+      fEq->ComposeEvent(fEventBuf, fEventSize);
+      fEq->BkInit(fEventBuf, fEventSize);
+      
+      double* ptr = (double*)fEq->BkOpen(fEventBuf, "TMP0", TID_DOUBLE);
+      for(int i = 0; i < 6; i++){
+         *ptr++ = temperature[i];
+      }
+      fEq->BkClose(fEventBuf, ptr+1);
+
+      fEq->SendEvent(fEventBuf);
+
+      fEq->WriteStatistics();
+   }
+
+
+   void SendEvent(double dvalue)
+   {
+      fEq->ComposeEvent(fEventBuf, fEventSize);
+      fEq->BkInit(fEventBuf, fEventSize);
+         
+      double* ptr = (double*)fEq->BkOpen(fEventBuf, "test", TID_DOUBLE);
+      *ptr = dvalue;
+      fEq->BkClose(fEventBuf, ptr+1);
+
+      std::cout << "Send event?" << std::endl;
+      fEq->SendEvent(fEventBuf);
    }
 
    std::string StatString(){
